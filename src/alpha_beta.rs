@@ -5,14 +5,13 @@ use chess::{Board, BoardStatus, ChessMove, MoveGen, Piece, EMPTY};
 const MATE_VALUE: f32 = 1000000000.;
 
 pub fn alpha_beta_search(board: &Board, max_depth: u32) -> (f32, ChessMove) {
-    // This is so shitty, but it works
     let move_gen_moves = MoveGen::new_legal(board);
     let mut chess_moves = Vec::new();
     for chess_move in move_gen_moves {
         chess_moves.push((0., chess_move));
     }
     for depth in 1..max_depth {
-        chess_moves = n_first_layer(&board, depth, f32::NEG_INFINITY, f32::INFINITY, &chess_moves);
+        chess_moves = n_first_layer(board, depth, f32::NEG_INFINITY, f32::INFINITY, &chess_moves);
         chess_moves.sort_by(|a, b| b.0.total_cmp(&a.0));
     }
     println!("Length: {}", chess_moves.len());
