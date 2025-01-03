@@ -2,23 +2,22 @@ use crate::eval::eval;
 
 use chess::{Board, BoardStatus, ChessMove, MoveGen, Piece, EMPTY};
 
-const MATE_VALUE: f32 = 1000000000.;
+use web_sys;
 
-pub fn alpha_beta_search(board: &Board, max_depth: u32) -> (f32, ChessMove) {
+const MATE_VALUE: i32 = 1000000000;
+
+pub fn alpha_beta_search(board: &Board, max_depth: u32) -> (i32, ChessMove) {
     let move_gen_moves = MoveGen::new_legal(board);
     let mut chess_moves = Vec::new();
     for chess_move in move_gen_moves {
-        chess_moves.push((0., chess_move));
+        chess_moves.push((0, chess_move));
     }
     for depth in 1..max_depth {
-        chess_moves = n_first_layer(board, depth, f32::NEG_INFINITY, f32::INFINITY, &chess_moves);
-        chess_moves.sort_by(|a, b| b.0.total_cmp(&a.0));
+        chess_moves = n_first_layer(board, depth, i32::MIN, i32::MAX, &chess_moves);
+        chess_moves.sort_by(|a, b| b.0.cmp(&a.0));
     }
-    println!("Length: {}", chess_moves.len());
-    if chess_moves.is_empty() {
-        println!("No moves! board: {}", board.to_string());
-    }
-    *chess_moves.iter().max_by(|a, b| a.0.total_cmp(&b.0)).unwrap()
+    web_sys::console::log_1(&format!("Best move!: {:?}", chess_moves).into());
+    *chess_moves.iter().max_by(|a, b| a.0.cmp(&b.0)).unwrap()
 }
 
 /// Check if the game is stalemate by only having 2 kings on the board.
@@ -32,17 +31,16 @@ pub fn only_kings(board: &Board) -> bool {
 fn n_first_layer(
     board: &Board,
     depth: u32,
-    mut a: f32,
-    b: f32,
-    move_order: &Vec<(f32, ChessMove)>
-) -> Vec<(f32, ChessMove)> {
-    let mut value = f32::NEG_INFINITY;
-    let mut output: Vec<(f32, ChessMove)> = Vec::new();
+    mut a: i32,
+    b: i32,
+    move_order: &Vec<(i32, ChessMove)>,
+) -> Vec<(i32, ChessMove)> {
+    let mut value = i32::MIN;
+    let mut output: Vec<(i32, ChessMove)> = Vec::new();
 
     let mut process_move = |chess_move: ChessMove| -> bool {
         let child_board = board.make_move_new(chess_move);
-        let mut new_value = n_max(&child_board, depth - 1, -b, -a);
-        new_value = -new_value;
+        let new_value = -n_max(&child_board, depth - 1, -b, -a);
         if new_value > value {
             value = new_value;
             a = a.max(value);
@@ -58,65 +56,86 @@ fn n_first_layer(
     output
 }
 
-fn n_max(board: &Board, depth: u32, mut a: f32, b: f32) -> f32 {
-    let mut value;
+fn quiescence_search(board: &Board, mut a: i32, b: i32) -> i32 {
+    // Should do a standing pat evaluation first
+    let stand_pat = eval(board);
+    if stand_pat >= b {
+        return stand_pat;
+    }
+    if stand_pat > a {
+        a = stand_pat;
+    }
+
+    let mut value = i32::MIN;
     if board.status() == BoardStatus::Checkmate {
-        return -MATE_VALUE - depth as f32;
+        return -MATE_VALUE;
     }
     if only_kings(board) || board.status() == BoardStatus::Stalemate {
-        return 0.;
+        return 0;
     }
-    if depth == 0 {
-        let value = eval(board);
-        return value;
-    }
-
     let mut chess_moves = MoveGen::new_legal(&board);
     let targets = board.color_combined(!board.side_to_move());
-    chess_moves.set_iterator_mask(*targets); // This makes the capture moves be first.
-
-    let first_move = match chess_moves.next() {
-        Some(mv) => mv,
-        None => {
-            chess_moves.set_iterator_mask(!EMPTY);
-            chess_moves.next().unwrap()
+    chess_moves.set_iterator_mask(*targets);
+    if chess_moves.len() == 0 {
+        return eval(board);
+    } else {
+        for chess_move in chess_moves {
+            let child_board = board.make_move_new(chess_move);
+            value = -quiescence_search(&child_board, -b, -a);
+            a = a.max(value);
+            if a >= b {
+                break;
+            }
         }
-    };
+        return value;
+    }
+}
 
-    let mut current_move;
-
-    // Process first move
-    {
-        let child_board = board.make_move_new(first_move);
-        let new_value = n_max(&child_board, depth - 1, -b, -a);
-        value = -new_value;
-        current_move = first_move;
-        a = a.max(value);
+fn n_max(board: &Board, depth: u32, mut a: i32, b: i32) -> i32 {
+    if board.status() == BoardStatus::Checkmate {
+        return -MATE_VALUE - depth as i32;
+    }
+    if only_kings(board) || board.status() == BoardStatus::Stalemate {
+        return 0;
+    }
+    if depth == 0 {
+        return quiescence_search(board, a, b);
     }
 
-    let mut process_move = |chess_move: ChessMove| -> bool {
-        let child_board = board.make_move_new(chess_move);
-        let mut new_value = n_max(&child_board, depth - 1, -b, -a);
-        new_value = -new_value;
-        if new_value > value {
-            value = new_value;
-            current_move = chess_move;
-            a = a.max(value);
-        }
-        a >= b
-    };
+    let mut value = i32::MIN;
+    let mut chess_moves = MoveGen::new_legal(board);
+
+    // Try captures first
+    let targets = board.color_combined(!board.side_to_move());
+    chess_moves.set_iterator_mask(*targets);
 
     for chess_move in &mut chess_moves {
-        if process_move(chess_move) {
-            //println!("a: {}, b: {}", a, b);
-            return value;
+        let child_board = board.make_move_new(chess_move);
+        let score = -n_max(&child_board, depth - 1, -b, -a);
+        if score > value {
+            value = score;
+            if value > a {
+                a = value;
+                if a >= b {
+                    return value;
+                }
+            }
         }
     }
+
+    // Then try non-captures
     chess_moves.set_iterator_mask(!EMPTY);
     for chess_move in &mut chess_moves {
-        if process_move(chess_move) {
-            //println!("a: {}, b: {}", a, b);
-            return value;
+        let child_board = board.make_move_new(chess_move);
+        let score = -n_max(&child_board, depth - 1, -b, -a);
+        if score > value {
+            value = score;
+            if value > a {
+                a = value;
+                if a >= b {
+                    return value;
+                }
+            }
         }
     }
 

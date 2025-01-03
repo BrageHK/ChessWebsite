@@ -58,11 +58,20 @@
         <div class="board-container">
             <div id="board"></div>
         </div>
+        <div id="thinking" style="display: none; color: #666; margin: 10px 0;">
+            Computer is thinking... 🤔
+        </div>
 
         <div class="control-panel">
+            <label>Status:</label>
+            <div id="status"></div>
+            <label>FEN:</label>
+            <div id="fen"></div>
+            <label>PGN:</label>
+            <div id="pgn"></div>
             <div class="control-group">
                 <label for="searchDepth">Search Depth: <span id="depthValue">4</span></label>
-                <input type="range" id="searchDepth" min="1" max="6" value="4"
+                <input type="range" id="searchDepth" min="1" max="10" value="4"
                     oninput="document.getElementById('depthValue').textContent = this.value">
             </div>
             <!-- Add more controls here as needed -->
@@ -75,61 +84,117 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 
     <script type="module">
-        import init, { make_chess_move } from './pkg/cursor_test.js';
+        import init, { make_chess_move } from './pkg/chess_website.js';
 
-        let board = null;
-        let game = null;
+        var $status = $('#status');
+        var $fen = $('#fen');
+        var $pgn = $('#pgn');
+        var game = new Chess();
+        var board = null;
+        var isThinking = false;
 
-        async function initialize() {
+        async function initializeWasm() {
             await init();
-            window.make_chess_move = make_chess_move;
+            console.log("WASM initialized");
+        }
 
-            // Initialize the chess game
-            game = new Chess();
+        function onDragStart(source, piece, position, orientation) {
+            if (game.game_over() || isThinking) return false;
 
-            // Initialize the board
-            board = Chessboard('board', {
-                position: 'start',
-                draggable: true,
-                onDrop: onDrop,
-                pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
-            });
+            if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+                (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
         }
 
         function onDrop(source, target) {
-            // Check if the move is legal
             const move = game.move({
                 from: source,
                 to: target,
-                promotion: 'q' // Always promote to queen for simplicity
+                promotion: 'q'
             });
 
-            // If illegal move, snap back
-            if (move === null) {
-                return 'snapback';
-            }
+            if (move === null) return 'snapback';
 
-            // Make WASM move in response
-            const fen = game.fen();
-            const depth = parseInt(document.getElementById('searchDepth').value);
-            const wasmMove = make_chess_move(fen, depth);
-            console.log('WASM suggested move:', wasmMove);
+            updateStatus();
+            setTimeout(makeAIMove, 100);
         }
 
-        window.makeMove = function () {
+        function onSnapEnd() {
+            board.position(game.fen());
+        }
+
+        async function makeAIMove() {
+            console.log("makeAIMove");
             const fen = game.fen();
             const depth = parseInt(document.getElementById('searchDepth').value);
+            console.log(depth);
+
+            isThinking = true;
+            $('#thinking').show();
+
             const result = make_chess_move(fen, depth);
             console.log(result);
 
-            // Update the board if the WASM returns a valid move
             if (result) {
-                game.move(result);
-                board.position(game.fen());
-            }
-        };
+                const chessmove = result.chess_move
+                const formattedResult = chessmove.slice(0, 2) + '-' + chessmove.slice(2);
+                console.log(formattedResult);
 
-        initialize();
+                game.move({
+                    from: formattedResult.slice(0, 2),
+                    to: formattedResult.slice(3),
+                    promotion: 'q'
+                });
+                board.position(game.fen());
+                updateStatus();
+            }
+
+            isThinking = false;
+            $('#thinking').hide();
+        }
+
+        function updateStatus() {
+            var status = '';
+            var moveColor = 'White';
+            if (game.turn() === 'b') {
+                moveColor = 'Black';
+            }
+
+            if (game.in_checkmate()) {
+                status = 'Game over, ' + moveColor + ' is in checkmate.';
+            } else if (game.in_draw()) {
+                status = 'Game over, drawn position';
+            } else {
+                status = moveColor + ' to move';
+                if (game.in_check()) {
+                    status += ', ' + moveColor + ' is in check';
+                }
+            }
+
+            $status.html(status);
+            $fen.html(game.fen());
+            $pgn.html(game.pgn());
+        }
+
+        function resetBoard() {
+            game.reset();
+            board.position('start');
+            updateStatus();
+        }
+
+        board = Chessboard('board', {
+            position: 'start',
+            draggable: true,
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onSnapEnd: onSnapEnd,
+            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+        });
+
+        initializeWasm().then(() => {
+            updateStatus();
+        });
     </script>
 </body>
 
