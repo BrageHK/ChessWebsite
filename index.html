@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>WASM Chess</title>
+    <!-- Add CSS for chessboard.js -->
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <style>
+        .board-container {
+            max-width: 600px;
+            margin: 20px auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="board-container">
+        <div id="board"></div>
+        <button onclick="makeMove()">Make Move</button>
+    </div>
+
+    <!-- Add required JavaScript libraries -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+    <script type="module">
+        import init, { make_chess_move } from './pkg/cursor_test.js';
+
+        let board = null;
+        let game = null;
+
+        async function initialize() {
+            await init();
+            window.make_chess_move = make_chess_move;
+
+            // Initialize the chess game
+            game = new Chess();
+
+            // Initialize the board
+            board = Chessboard('board', {
+                position: 'start',
+                draggable: true,
+                onDrop: onDrop,
+                pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+            });
+        }
+
+        function onDrop(source, target) {
+            // Check if the move is legal
+            const move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // Always promote to queen for simplicity
+            });
+
+            // If illegal move, snap back
+            if (move === null) {
+                return 'snapback';
+            }
+
+            // Make WASM move in response
+            const fen = game.fen();
+            const wasmMove = make_chess_move(fen);
+            console.log('WASM suggested move:', wasmMove);
+        }
+
+        window.makeMove = function () {
+            const fen = game.fen();
+            const result = make_chess_move(fen);
+            console.log(result);
+
+            // Update the board if the WASM returns a valid move
+            if (result) {
+                game.move(result);
+                board.position(game.fen());
+            }
+        };
+
+        initialize();
+    </script>
+</body>
+
+</html>
